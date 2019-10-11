@@ -36,7 +36,7 @@ int getMedian(std::vector<int> angleArray) {
         // between 0-30 and 330-360, and 60degree swing
         return angleArray.at(sizeOfAngle / 2);
       } else {
-        return (angleArray.at(sizeOfAngle / 2) + angleArray.at(sizeOfAngle / 2) -1 ) / 2;
+        return ( angleArray.at(sizeOfAngle / 2) + angleArray.at(sizeOfAngle / 2 - 1) ) / 2;
       }
   } else { // odd
     return angleArray.at(sizeOfAngle / 2);
@@ -141,6 +141,16 @@ void json_parse(json_object *jobj) {
   }
 }
 
+void clearLEDs(hal::EverloopImage* image1d, hal::Everloop* everloop) {
+  for (hal::LedValue &led : image1d->leds) {
+    led.red = 0;
+    led.green = 0;
+    led.blue = 0;
+    led.white = 0;
+  }
+  everloop->Write(image1d);
+}
+
 int main(int argc, char *argv[]) {
   // Everloop Initialization
   hal::MatrixIOBus bus;
@@ -150,13 +160,7 @@ int main(int argc, char *argv[]) {
   everloop.Setup(&bus);
 
   // Clear all LEDs
-  for (hal::LedValue &led : image1d.leds) {
-    led.red = 0;
-    led.green = 0;
-    led.blue = 0;
-    led.white = 0;
-  }
-  everloop.Write(&image1d);
+  clearLEDs(&image1d, &everloop);
 
   char verbose = 0x00;
 
@@ -260,4 +264,6 @@ int main(int argc, char *argv[]) {
 
     everloop.Write(&image1d);
   }
+
+  clearLEDs(&image1d, &everloop);
 }
