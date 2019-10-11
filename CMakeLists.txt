@@ -28,6 +28,8 @@ find_path (JSON_C_INCLUDE_DIR json.h PATH_SUFFIXES json-c json)
 find_library (JSON_C_LIBRARIES NAMES json-c libjson-c)
 include_directories (${JSON_C_INCLUDE_DIR})
 
+find_package(cppzmq)
+
 set(SRC
 
     src/general/format.c
@@ -229,6 +231,16 @@ add_executable(odasserver
 )
 target_link_libraries(odasserver
     odas
+)
+
+add_executable(matrix-odas-forwarder
+    demo/matrix-demos/matrix-odas-forwarder.cpp
+)
+target_link_libraries(matrix-odas-forwarder
+    odas
+    cppzmq
+    ${JSON_C_LIBRARIES}
+    ${MATRIX_CREATOR_HAL}
 )
 
 install(TARGETS odas        DESTINATION lib)
