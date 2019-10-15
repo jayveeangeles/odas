@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <array>
 #include <iostream>
 #include <vector>
@@ -27,6 +28,8 @@ namespace hal = matrix_hal;
 // MAX_BRIGHTNESS: 0 - 255
 #define MAX_BRIGHTNESS 50
 
+#define MICROSECONDS 1000000
+
 bool sortDescending (int i,int j) { return (i<j); }
 int getMedian(std::vector<int> angleArray) {
   unsigned int sizeOfAngle = angleArray.size();
@@ -34,16 +37,17 @@ int getMedian(std::vector<int> angleArray) {
     if (angleArray.at(sizeOfAngle / 2) >= 330 && angleArray.at(sizeOfAngle / 2) < 360 \
       && angleArray.at(sizeOfAngle / 2 - 1) >=0 && angleArray.at(sizeOfAngle / 2 - 1) <= 30) {
         // between 0-30 and 330-360, and 60degree swing
-        return angleArray.at(sizeOfAngle / 2);
-      } else {
-        return ( angleArray.at(sizeOfAngle / 2) + angleArray.at(sizeOfAngle / 2 - 1) ) / 2;
-      }
+      return angleArray.at(sizeOfAngle / 2);
+    } else {
+      return ( angleArray.at(sizeOfAngle / 2) + angleArray.at(sizeOfAngle / 2 - 1) ) / 2;
+    }
   } else { // odd
     return angleArray.at(sizeOfAngle / 2);
   }
 }
 
-double x, y, z, E;
+double x, y, z, E, eLevelTmp;
+unsigned int timeStamp, energyIndex, currArrIndex;
 int energy_array[ENERGY_COUNT];
 const double leds_angle_mcreator[35] = {
     170, 159, 149, 139, 129, 118, 108, 98,  87,  77,  67,  57,
@@ -88,6 +92,7 @@ void json_parse_array(json_object *jobj, char *key) {
   int i;
   json_object *jvalue;
 
+  // for (currArrIndex = 0; currArrIndex < arraylen; currArrIndex++) {
   for (i = 0; i < arraylen; i++) {
     jvalue = json_object_array_get_idx(jarray, i);
     type = json_object_get_type(jvalue);
@@ -104,6 +109,10 @@ void json_parse_array(json_object *jobj, char *key) {
 void json_parse(json_object *jobj) {
   enum json_type type;
   unsigned int count = 0;
+   if (json_object_get_type(jobj) != json_type_object) {
+    printf("Error parsing json object: Type is not object\n");
+    return;
+  }
   decrease_pots();
   json_object_object_foreach(jobj, key, val) {
     type = json_object_get_type(val);
@@ -119,11 +128,20 @@ void json_parse(json_object *jobj) {
           z = json_object_get_double(val);
         } else if (!strcmp(key, "E")) {
           E = json_object_get_double(val);
+          // if (eLevelTmp < E) {
+          //   eLevelTmp = E;
+          //   energyIndex = currArrIndex;
+          // }
         }
+
         increase_pots();
         count++;
+
         break;
       case json_type_int:
+        if (!strcmp(key, "timeStamp")) {
+          timeStamp = json_object_get_int(val);
+        }
         break;
       case json_type_string:
         break;
@@ -204,15 +222,23 @@ int main(int argc, char *argv[]) {
   publisher.bind("ipc:///tmp/feeds");
 
   std::vector<int> angleArray;
+  struct timeval tv;
+  unsigned long long ts;
   
   const std::string zmqTopic = "iot-2/evt/newAngle";
+  int newAngle = -1;
 
   while ((messageSize = recv(connection_id, message, nBytes, 0)) > 0) {
+    gettimeofday(&tv, NULL);
+    ts = (unsigned long long)(tv.tv_sec) * MICROSECONDS + (unsigned long long)(tv.tv_usec);
     message[messageSize] = 0x00;
+    // eLevelTmp = 0.0;
+    // energyIndex = 0;
 
     // printf("message: %s\n\n", message);
     json_object *jobj = json_tokener_parse(message);
     json_parse(jobj);
+    json_object_put(jobj);
 
     for (int i = 0; i < bus.MatrixLeds(); i++) {
       // led index to angle
@@ -239,31 +265,31 @@ int main(int argc, char *argv[]) {
 
     if (angleArray.size() > 0){
       std::sort(angleArray.begin(), angleArray.end(), sortDescending);
-      auto newAngle = getMedian(angleArray);
-
-      /*Creating a json object*/
-      json_object * jobj = json_object_new_object();
-
-      /*Creating a json integer*/
-      json_object *jint = json_object_new_int(newAngle);
-
-      /*Form the json object*/
-      json_object_object_add(jobj,"soundAngle", jint);
-
-      const char* jsonMessage = json_object_to_json_string(jobj);
-      const unsigned int sizeOfJSONMessage = strlen(jsonMessage);
-
-      zmq::message_t zmqMessage(sizeOfJSONMessage);
-      memcpy(zmqMessage.data(), jsonMessage, sizeOfJSONMessage);
-
-      publisher.send(zmq::buffer(zmqTopic), zmq::send_flags::sndmore);
-      publisher.send(zmqMessage, zmq::send_flags::dontwait);
+      newAngle = getMedian(angleArray);
+    } else {
+      newAngle = -1;
     }
+
+    // const std::string jsonMessage = std::string("{\"angle\":") + std::to_string(newAngle) + \
+    //   ",\"ts\":" + std::to_string(ts) + ",\"frameIdx\":" + std::to_string(timeStamp) + \
+    //   ",\"energy\":" + std::to_string(energyIndex) + "}";
+
+    const std::string jsonMessage = std::string("{\"angle\":") + std::to_string(newAngle) + \
+      ",\"ts\":" + std::to_string(ts) + ",\"frameIdx\":" + std::to_string(timeStamp) + "}";
+
+    zmq::message_t zmqMessage(jsonMessage.length());
+
+    memcpy(zmqMessage.data(), jsonMessage.data(), jsonMessage.length());
+
+    publisher.send(zmq::buffer(zmqTopic), zmq::send_flags::sndmore);
+    publisher.send(zmqMessage, zmq::send_flags::dontwait);
 
     angleArray.clear();
 
     everloop.Write(&image1d);
   }
+
+  free(message);
 
   clearLEDs(&image1d, &everloop);
 }
